@@ -62,7 +62,7 @@ unsafe extern "C" fn kmain() -> ! {
     }
 
     serial::write(format_args!(
-        "KaluOS v0.01 booting...!\n"
+        "KaluOS v0.02 booting...!\n"
     ));
 
     unsafe {
