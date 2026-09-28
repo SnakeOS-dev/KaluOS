@@ -18,6 +18,8 @@ pub const SYS_MKDIR: u64 = 17;
 pub const SYS_RMDIR: u64 = 18;
 pub const SYS_TEST_FILE: u64 = 19;
 pub const SYS_EXIT: u64 = 20;
+pub const SYS_WAIT: u64 = 21;
+pub const SYS_SLEEP: u64 = 22;
 
 pub const O_READ: u64 = 1;
 pub const O_WRITE: u64 = 2;
@@ -34,4 +36,10 @@ pub struct Dirent {
     pub name_len: u8,
     pub reserved: u16,
     pub name: [u8; 256],
+}
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct UserArg {
+    pub ptr: u64,
+    pub len: u64,
 }

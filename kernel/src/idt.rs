@@ -267,15 +267,12 @@ extern "C" fn timer_interrupt_entry(
 extern "C" fn keyboard_interrupt_entry(
     rsp: u64,
 ) -> u64 {
-    let scancode =
-        unsafe { crate::keyboard::read_scancode() };
+    crate::keyboard::handle();
 
-    crate::keyboard::handle(scancode);
     crate::pic::eoi(1);
 
     rsp
 }
-
 #[unsafe(no_mangle)]
 extern "C" fn kernel_yield_interrupt_entry(
     rsp: u64,

@@ -53,7 +53,60 @@ pub struct SyscallFrame {
     pub rsp: u64,
     pub ss: u64,
 }
+fn copy_arguments(
+    argc: usize,
+    argv_ptr: u64,
+) -> Option<Vec<String>> {
+    if argc > 128 {
+        return None;
+    }
 
+    let mut result =
+        Vec::with_capacity(argc);
+
+    for index in 0..argc {
+        let base =
+            argv_ptr
+                + (
+                    index
+                    * core::mem::size_of::<UserArg>()
+                ) as u64;
+
+        let raw =
+            copy_from_user(
+                base,
+                core::mem::size_of::<UserArg>(),
+            )?;
+
+        let ptr =
+            u64::from_le_bytes(
+                raw[0..8]
+                    .try_into()
+                    .ok()?,
+            );
+
+        let len =
+            u64::from_le_bytes(
+                raw[8..16]
+                    .try_into()
+                    .ok()?,
+            ) as usize;
+
+        if len > 4096 {
+            return None;
+        }
+
+        let string =
+            read_string(
+                ptr,
+                len,
+            )?;
+
+        result.push(string);
+    }
+
+    Some(result)
+}
 fn err(value: i64) -> u64 {
     value as u64
 }
@@ -591,44 +644,72 @@ fn syscall_remove(
 fn syscall_spawn(
     ptr: u64,
     len: usize,
+    argc: usize,
+    argv_ptr: u64,
     priority: u8,
 ) -> u64 {
-    let Some(raw) =
-        read_string(ptr, len)
+    let Some(raw_path) =
+        read_string(
+            ptr,
+            len,
+        )
     else {
         return err(EINVAL);
     };
 
     let Some(path) =
-        canonical_path(&raw)
+        canonical_path(
+            &raw_path,
+        )
     else {
         return err(EINVAL);
     };
 
+    let Some(mut argv) =
+        copy_arguments(
+            argc,
+            argv_ptr,
+        )
+    else {
+        return err(EINVAL);
+    };
+
+    if argv.is_empty() {
+        argv.push(
+            path.clone(),
+        );
+    }
+
     let program =
-        match elf::load(&path) {
+        match elf::load(
+            &path,
+            &argv,
+        ) {
             Ok(value) => value,
+
             Err(_) =>
                 return err(ENOENT),
         };
 
-    let Some(pid) =
-        scheduler::spawn_user(
-            program.entry,
-            program.stack,
-            program.cr3,
-            priority.clamp(1, 10),
-            0,
-        )
-    else {
-        return err(ENOMEM);
-    };
+	let parent_pid =
+   	    scheduler::current_pid();
 
-    process::register(pid);
+	let Some(pid) =
+		scheduler::spawn_user(
+        	program.entry,
+	        program.stack,
+		program.cr3,
+	        priority.clamp(1, 10),
+        	parent_pid,
+	    )
+	else {
+	    return err(ENOMEM);
+	};
 
-    pid
+	process::register(pid);
+
+	pid
 }
-
 fn syscall_getc() -> u64 {
     match keyboard::getc() {
         Some(value) =>
@@ -780,6 +861,8 @@ fn syscall_exec(
     frame: &mut SyscallFrame,
     ptr: u64,
     len: usize,
+    argc: usize,
+    argv_ptr: u64,
 ) -> u64 {
     let Some(raw) =
         read_string(
@@ -798,11 +881,28 @@ fn syscall_exec(
         return err(EINVAL);
     };
 
+    let Some(mut argv) =
+        copy_arguments(
+            argc,
+            argv_ptr,
+        )
+    else {
+        return err(EINVAL);
+    };
+
+    if argv.is_empty() {
+        argv.push(
+            path.clone(),
+        );
+    }
+
     let program =
         match elf::load(
             &path,
+            &argv,
         ) {
             Ok(value) => value,
+
             Err(_) =>
                 return err(ENOENT),
         };
@@ -831,8 +931,7 @@ fn syscall_exec(
         crate::gdt::USER_DATA
             as u64;
 
-    frame.rflags =
-        0x202;
+    frame.rflags = 0x202;
 
     frame.rax = 0;
     frame.rbx = 0;
@@ -852,7 +951,6 @@ fn syscall_exec(
 
     0
 }
-
 fn syscall_open(
     ptr: u64,
     len: usize,
@@ -1019,7 +1117,45 @@ fn syscall_test_file(
         Err(_) => 0,
     }
 }
+fn syscall_wait(
+    wanted_pid: u64,
+    status_ptr: u64,
+) -> u64 {
+    let parent =
+        scheduler::current_pid();
 
+    match scheduler::wait_child(
+        parent,
+        wanted_pid,
+    ) {
+        scheduler::WaitResult::Exited(
+            pid,
+            code,
+        ) => {
+            if status_ptr != 0 {
+                let bytes =
+                    code.to_le_bytes();
+
+                if !copy_to_user(
+                    status_ptr,
+                    &bytes,
+                ) {
+                    return err(EINVAL);
+                }
+            }
+
+            process::remove(pid);
+
+            pid
+        }
+
+        scheduler::WaitResult::Running =>
+            err(EAGAIN),
+
+        scheduler::WaitResult::NoChild =>
+            err(ENOENT),
+    }
+}
 #[unsafe(no_mangle)]
 pub extern "C" fn syscall_interrupt_entry(
     frame_rsp: u64,
@@ -1081,14 +1217,13 @@ pub extern "C" fn syscall_interrupt_entry(
                 ),
 
             SYS_SPAWN =>
-                syscall_spawn(
-                    frame.rdi,
-                    frame.rsi
-                        as usize,
-                    frame.rdx
-                        as u8,
-                ),
-
+	    syscall_spawn(
+        	frame.rdi,
+	        frame.rsi as usize,
+        	frame.rdx as usize,
+	        frame.r10,
+        	frame.r8 as u8,
+	    ),
             SYS_GETC =>
                 syscall_getc(),
 
@@ -1125,13 +1260,13 @@ pub extern "C" fn syscall_interrupt_entry(
                 ),
 
             SYS_EXEC =>
-                syscall_exec(
-                    frame,
-                    frame.rdi,
-                    frame.rsi
-                        as usize,
-                ),
-
+	    syscall_exec(
+	        frame,
+		frame.rdi,
+        	frame.rsi as usize,
+	        frame.rdx as usize,
+	        frame.r10,
+	    ),
             SYS_OPEN =>
                 syscall_open(
                     frame.rdi,
@@ -1179,16 +1314,26 @@ pub extern "C" fn syscall_interrupt_entry(
                     scheduler
                         ::current_pid();
 
-                process::remove(pid);
-
-                return scheduler
-                    ::exit_from_interrupt(
-                        frame_rsp,
-                        frame.rdi
-                            as i32,
-                    );
+		return scheduler::exit_from_interrupt(
+		    frame_rsp,
+		    frame.rdi as i32,
+		);
             }
 
+	    SYS_WAIT =>
+	    syscall_wait(
+        	frame.rdi,
+	        frame.rsi,
+	    ),
+
+	SYS_SLEEP => {
+	    frame.rax = 0;
+
+	    return scheduler::sleep_from_interrupt(
+        	frame_rsp,
+	        frame.rdi,
+	    );
+	}
             _ =>
                 err(EINVAL),
         };

@@ -27,12 +27,7 @@ run-hdd: run-hdd-$(KARCH)
 
 .PHONY: run-x86_64
 run-x86_64: edk2-ovmf $(IMAGE_NAME).iso
-	qemu-system-$(KARCH) \
-		-M q35 \
-		-drive if=pflash,unit=0,format=raw,file=edk2-ovmf/ovmf-code-$(KARCH).fd,readonly=on \
-		-cdrom $(IMAGE_NAME).iso \
-		$(QEMUFLAGS)
-
+	qemu-system-x86_64     -M pc     -cdrom template-x86_64.iso     -m 128M  -nographic  -no-reboot   -hda disk.img
 .PHONY: run-hdd-x86_64
 run-hdd-x86_64: edk2-ovmf $(IMAGE_NAME).hdd
 	qemu-system-$(KARCH) \

@@ -161,10 +161,24 @@ unsafe extern "C" fn kmain() -> ! {
         init_stat.size
     ));
 
-    let init =
-        elf::load("/bin/init")
-            .expect("failed to load /bin/init");
+    use alloc::{
+    string::String,
+    vec,
+};
 
+    let init_args =
+    vec![
+        String::from("/bin/init"),
+    ];
+
+    let init =
+    elf::load(
+        "/bin/init",
+        &init_args,
+    )
+    .expect(
+        "failed to load /bin/init"
+    );
     serial::write(format_args!(
         "init: entry={:#x} cr3={:#x} stack={:#x}\n",
         init.entry,

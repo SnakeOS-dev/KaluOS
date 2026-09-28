@@ -1,7 +1,9 @@
 #pragma once
-
 #include <stdint.h>
-
+typedef struct {
+    const char *ptr;
+    uint64_t len;
+} kalu_arg_t;
 #define SYS_TEXT 1
 #define SYS_READ 2
 #define SYS_WRITE 3
@@ -22,15 +24,14 @@
 #define SYS_RMDIR 18
 #define SYS_TEST_FILE 19
 #define SYS_EXIT 20
-
+#define SYS_WAIT 21
+#define SYS_SLEEP 22
 #define O_READ 1
 #define O_WRITE 2
 #define O_CREATE 4
 #define O_TRUNC 8
-
 #define MAP_WRITE 1
 #define MAP_EXEC 2
-
 uint64_t __syscall0(uint64_t n);
 uint64_t __syscall1(uint64_t n, uint64_t a);
 uint64_t __syscall2(uint64_t n, uint64_t a, uint64_t b);

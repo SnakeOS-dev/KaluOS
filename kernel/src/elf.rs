@@ -1,7 +1,10 @@
 extern crate alloc;
 
-use alloc::vec;
-
+use alloc::{
+    string::String,
+    vec,
+    vec::Vec,
+};
 use crate::{
     pmm,
     vfs,
@@ -77,6 +80,7 @@ fn le64(
 
 pub fn load(
     path: &str,
+    argv: &[String],
 ) -> Result<LoadedElf, ElfError> {
     let stat =
         vfs::stat(path)
@@ -337,10 +341,134 @@ pub fn load(
         )?;
     }
 
-    Ok(LoadedElf {
+    let stack =
+    build_initial_stack(
         cr3,
-        entry,
-        stack:
-            USER_STACK_TOP - 16,
+        argv,
+    )?;
+
+    Ok(LoadedElf {
+	cr3,
+	entry,
+	stack,
     })
+}
+fn write_user_bytes(
+    cr3: u64,
+    address: u64,
+    data: &[u8],
+) -> Result<(), ElfError> {
+    for (i, byte) in data.iter().enumerate() {
+        let virt =
+            address + i as u64;
+
+        let phys =
+            unsafe {
+                vmm::translate(
+                    cr3,
+                    virt,
+                )
+            }
+            .ok_or(
+                ElfError::Mapping
+            )?;
+
+        let ptr =
+            vmm::phys_to_virt_addr(
+                phys,
+            ) as *mut u8;
+
+        unsafe {
+            ptr.write(*byte);
+        }
+    }
+
+    Ok(())
+}
+
+fn write_user_u64(
+    cr3: u64,
+    address: u64,
+    value: u64,
+) -> Result<(), ElfError> {
+    write_user_bytes(
+        cr3,
+        address,
+        &value.to_le_bytes(),
+    )
+}
+
+fn build_initial_stack(
+    cr3: u64,
+    argv: &[String],
+) -> Result<u64, ElfError> {
+    let mut rsp =
+        USER_STACK_TOP;
+
+    let mut pointers:
+        Vec<u64> =
+        Vec::with_capacity(
+            argv.len(),
+        );
+
+    for arg in argv.iter().rev() {
+        let bytes =
+            arg.as_bytes();
+
+        rsp = rsp
+            .checked_sub(
+                bytes.len() as u64 + 1,
+            )
+            .ok_or(
+                ElfError::Memory
+            )?;
+
+        write_user_bytes(
+            cr3,
+            rsp,
+            bytes,
+        )?;
+
+        write_user_bytes(
+            cr3,
+            rsp + bytes.len() as u64,
+            &[0],
+        )?;
+
+        pointers.push(rsp);
+    }
+
+    pointers.reverse();
+
+    rsp &= !0xF;
+
+    rsp -= 8;
+
+    write_user_u64(
+        cr3,
+        rsp,
+        0,
+    )?;
+
+    for pointer in
+        pointers.iter().rev()
+    {
+        rsp -= 8;
+
+        write_user_u64(
+            cr3,
+            rsp,
+            *pointer,
+        )?;
+    }
+
+    rsp -= 8;
+
+    write_user_u64(
+        cr3,
+        rsp,
+        argv.len() as u64,
+    )?;
+
+    Ok(rsp)
 }

@@ -37,3 +37,4 @@ __pycache__/
 /ovmf
 *.iso
 *.hdd
+edk2-ovmf/

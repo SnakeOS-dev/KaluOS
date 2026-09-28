@@ -19,14 +19,26 @@ int unlink(const char *path);
 int mkdir(const char *path);
 int rmdir(const char *path);
 
-int spawn(const char *path, int priority);
-int exec(const char *path);
-
+int spawn(
+    const char *path,
+    int argc,
+    char **argv,
+    int priority
+);
+int exec(
+    const char *path,
+    int argc,
+    char **argv
+);
 int test_file(const char *path);
 
 int getc_raw(void);
 
 uint64_t ticks(void);
-void yield(void);
+int wait(int pid, int *status);
+
+void sleep_ticks(uint64_t ticks);
+void sleep_ms(uint64_t ms);
+void sleep(unsigned int seconds);void yield(void);
 
 int sysname(char *buffer, size_t size);
