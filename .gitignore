@@ -10,7 +10,6 @@ userland/**/*.a
 userland/**/*.so
 userland/**/*.elf
 userland/**/*.bin
-userland/programs/**/init
 userland/programs/**/*.out
 disk.img
 *.img
